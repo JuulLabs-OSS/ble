@@ -3,9 +3,9 @@ package hci
 import (
 	"net"
 
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux/adv"
-	"github.com/runtimeco/ble/linux/hci/evt"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux/adv"
+	"github.com/JuulLabs-OSS/ble/linux/hci/evt"
 )
 
 // RandomAddress is a Random Device Address.

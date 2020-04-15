@@ -3,7 +3,7 @@ package adv
 import (
 	"encoding/binary"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 // Packet is an implemntation of ble.AdvPacket for crafting or parsing an advertising packet or scan response.

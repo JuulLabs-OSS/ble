@@ -6,7 +6,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 func newConn(d *Device, a ble.Addr, txMTU int) *conn {

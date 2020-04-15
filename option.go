@@ -1,10 +1,10 @@
 package ble
 
 import (
-	"github.com/runtimeco/ble/linux/hci/evt"
+	"github.com/JuulLabs-OSS/ble/linux/hci/evt"
 	"time"
 
-	"github.com/runtimeco/ble/linux/hci/cmd"
+	"github.com/JuulLabs-OSS/ble/linux/hci/cmd"
 )
 
 // DeviceOption is an interface which the device should implement to allow using configuration options

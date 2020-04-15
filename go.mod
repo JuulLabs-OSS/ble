@@ -1,9 +1,8 @@
-module github.com/runtimeco/ble
+module github.com/JuulLabs-OSS/ble
 
 go 1.13
 
 require (
-	github.com/google/uuid v1.1.1
 	github.com/mattn/go-colorable v0.1.4 // indirect
 	github.com/mattn/go-isatty v0.0.10 // indirect
 	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect

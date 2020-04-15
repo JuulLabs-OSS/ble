@@ -2,10 +2,10 @@ package hci
 
 import (
 	"errors"
-	"github.com/runtimeco/ble/linux/hci/evt"
+	"github.com/JuulLabs-OSS/ble/linux/hci/evt"
 	"time"
 
-	"github.com/runtimeco/ble/linux/hci/cmd"
+	"github.com/JuulLabs-OSS/ble/linux/hci/cmd"
 )
 
 // SetDeviceID sets HCI device ID.

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 func advHandler(a ble.Advertisement) {

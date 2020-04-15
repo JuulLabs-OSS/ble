@@ -1,6 +1,6 @@
 package lib
 
-import "github.com/runtimeco/ble"
+import "github.com/JuulLabs-OSS/ble"
 
 // NewBatteryService ...
 func NewBatteryService() *ble.Service {

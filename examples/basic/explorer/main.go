@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/examples/lib/dev"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/examples/lib/dev"
 	"github.com/pkg/errors"
 )
 

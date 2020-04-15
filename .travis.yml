@@ -8,7 +8,7 @@ go:
         - 1.9
         - tip
 
-go_import_path: github.com/runtimeco/ble
+go_import_path: github.com/JuulLabs-OSS/ble
 
 install:
         - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then go get ./...; fi

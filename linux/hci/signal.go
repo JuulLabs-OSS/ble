@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/runtimeco/ble/linux/hci/cmd"
+	"github.com/JuulLabs-OSS/ble/linux/hci/cmd"
 )
 
 // Signal ...

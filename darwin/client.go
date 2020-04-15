@@ -3,7 +3,7 @@ package darwin
 import (
 	"fmt"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 // A Client is a GATT client.

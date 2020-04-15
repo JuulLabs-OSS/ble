@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 func explore(cln ble.Client, p *ble.Profile) error {

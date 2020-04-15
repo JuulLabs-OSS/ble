@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux"
-	"github.com/runtimeco/ble/linux/hci/cmd"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux"
+	"github.com/JuulLabs-OSS/ble/linux/hci/cmd"
 	"github.com/pkg/errors"
 )
 

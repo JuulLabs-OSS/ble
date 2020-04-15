@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 	"github.com/urfave/cli"
 )
 

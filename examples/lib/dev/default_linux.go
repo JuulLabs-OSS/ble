@@ -1,8 +1,8 @@
 package dev
 
 import (
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux"
 )
 
 // DefaultDevice ...

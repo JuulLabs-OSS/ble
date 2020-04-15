@@ -1,7 +1,7 @@
 package dev
 
 import (
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 // NewDevice ...

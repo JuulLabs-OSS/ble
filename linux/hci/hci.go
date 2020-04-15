@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux/hci/cmd"
-	"github.com/runtimeco/ble/linux/hci/evt"
-	"github.com/runtimeco/ble/linux/hci/socket"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux/hci/cmd"
+	"github.com/JuulLabs-OSS/ble/linux/hci/evt"
+	"github.com/JuulLabs-OSS/ble/linux/hci/socket"
 	"github.com/pkg/errors"
 )
 

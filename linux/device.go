@@ -5,10 +5,10 @@ import (
 	"io"
 	"log"
 
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux/att"
-	"github.com/runtimeco/ble/linux/gatt"
-	"github.com/runtimeco/ble/linux/hci"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux/att"
+	"github.com/JuulLabs-OSS/ble/linux/gatt"
+	"github.com/JuulLabs-OSS/ble/linux/hci"
 	"github.com/pkg/errors"
 )
 

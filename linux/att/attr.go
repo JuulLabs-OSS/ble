@@ -1,6 +1,6 @@
 package att
 
-import "github.com/runtimeco/ble"
+import "github.com/JuulLabs-OSS/ble"
 
 // attr is a BLE attribute.
 type attr struct {

@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/runtimeco/ble"
-	"github.com/runtimeco/ble/linux/att"
+	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/ble/linux/att"
 )
 
 const (

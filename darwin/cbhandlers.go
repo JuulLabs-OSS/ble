@@ -13,7 +13,7 @@ import (
 	"log"
 	"unsafe"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 //export BTStateChanged

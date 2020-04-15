@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 )
 
 // NewCountChar ...

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/runtimeco/ble"
+	"github.com/JuulLabs-OSS/ble"
 	"github.com/pkg/errors"
 )
 
