@@ -15,6 +15,26 @@ byte_arr_to_nsdata(const struct byte_arr *ba)
     return [NSData dataWithBytes: ba->data length: ba->length];
 }
 
+NSString *
+str_to_nsstring(const char *s)
+{
+    return [[NSString alloc] initWithCString:s encoding:NSUTF8StringEncoding];
+}
+
+NSUUID *
+str_to_nsuuid(const char *s)
+{
+    NSString *nss = str_to_nsstring(s);
+    return [[NSUUID alloc] initWithUUIDString:nss];
+}
+
+CBUUID *
+str_to_cbuuid(const char *s)
+{
+    NSString *nss = str_to_nsstring(s);
+    return [CBUUID UUIDWithString:nss];
+}
+
 int 
 dict_int(NSDictionary *dict, NSString *key)
 {
@@ -43,11 +63,4 @@ dict_bytes(NSDictionary *dict, NSString *key)
 {
     const NSData *nsdata = [dict objectForKey:key];
     return nsdata_to_byte_arr(nsdata);
-}
-
-NSUUID *
-uuid_from_str(const char *s)
-{
-    NSString *nss = [[NSString alloc] initWithCString:s encoding:NSUTF8StringEncoding];
-    return [[NSUUID alloc] initWithUUIDString:nss];
 }

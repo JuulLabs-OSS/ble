@@ -7,19 +7,58 @@ package darwin
 import "C"
 import (
 	"fmt"
+	"runtime"
+	"sync"
 	"unsafe"
 
 	"github.com/JuulLabs-OSS/ble"
 )
 
 var cmgrIDDevMap = map[uintptr]*Device{}
+var cmgrIDDevMapMutex sync.RWMutex
 
-func cmgrIDToDev(id C.uintptr_t) *Device {
+func findCmgr(id C.uintptr_t) *Device {
+	cmgrIDDevMapMutex.RLock()
+	defer cmgrIDDevMapMutex.RUnlock()
+
 	return cmgrIDDevMap[uintptr(id)]
 }
 
-func cmgrIDToDevAndConn(cmgrID C.uintptr_t, uuidStr *C.char) (*Device, *conn, error) {
-	d := cmgrIDToDev(cmgrID)
+func addCmgr(id uintptr, d *Device) {
+	cmgrIDDevMapMutex.Lock()
+	defer cmgrIDDevMapMutex.Unlock()
+
+	cmgrIDDevMap[id] = d
+}
+
+func delCmgr(id uintptr) *Device {
+	cmgrIDDevMapMutex.Lock()
+	defer cmgrIDDevMapMutex.Unlock()
+
+	d := cmgrIDDevMap[id]
+	delete(cmgrIDDevMap, id)
+
+	return d
+}
+
+func cmgrStateChanged(id uintptr, state BTState) bool {
+	// We have to keep the mutex locked even after we retrieve the device from
+	// the map.  This necessary in case another thread closes the channel
+	// (Stop()) between retrieval and send.
+	cmgrIDDevMapMutex.RLock()
+	defer cmgrIDDevMapMutex.RUnlock()
+
+	d := cmgrIDDevMap[id]
+	if d == nil {
+		return false
+	}
+
+	d.cm.stateCh <- state
+	return true
+}
+
+func findCmgrAndConn(cmgrID C.uintptr_t, uuidStr *C.char) (*Device, *conn, error) {
+	d := findCmgr(cmgrID)
 	if d == nil {
 		return nil, nil, fmt.Errorf("no device for central manager: cmgrID=%d",
 			uintptr(cmgrID))
@@ -41,18 +80,53 @@ func cmgrIDToDevAndConn(cmgrID C.uintptr_t, uuidStr *C.char) (*Device, *conn, er
 }
 
 type CentralMgr struct {
-	ptr unsafe.Pointer
-	id  uintptr
+	ptr     unsafe.Pointer
+	id      uintptr
+	stateCh chan BTState
 }
 
-func NewCentralMgr(d *Device) *CentralMgr {
+func NewCentralMgr() *CentralMgr {
 	cm := &CentralMgr{}
-	cm.ptr = unsafe.Pointer(C.cb_alloc_cmgr())
-	cm.id = uintptr(C.cb_cmgr_id(cm.ptr))
-
-	cmgrIDDevMap[cm.id] = d
+	runtime.SetFinalizer(cm, func(x *CentralMgr) {
+		x.Stop()
+	})
 
 	return cm
+}
+
+func (cm *CentralMgr) Start(d *Device) error {
+	if cm.ptr != nil {
+		return fmt.Errorf("failed to start central manager: already started")
+	}
+
+	cm.ptr = unsafe.Pointer(C.cb_alloc_cmgr())
+	cm.id = uintptr(C.cb_cmgr_id(cm.ptr))
+	cm.stateCh = make(chan BTState)
+
+	addCmgr(cm.id, d)
+
+	err := StartBTLoop(cm.stateCh)
+	if err != nil {
+		return fmt.Errorf("failed to start central manager: %v", err)
+	}
+
+	return nil
+}
+
+func (cm *CentralMgr) Stop() {
+	if cm.ptr == nil {
+		return
+	}
+
+	C.cb_destroy_cmgr(cm.ptr)
+	cm.ptr = nil
+
+	d := delCmgr(cm.id)
+	close(cm.stateCh)
+
+	if d != nil {
+		d.closeConns()
+	}
 }
 
 func (cm *CentralMgr) Scan(filterDups bool) {
@@ -93,7 +167,7 @@ func (cm *CentralMgr) attMTU(a ble.Addr) (int, error) {
 
 	mtu := C.cb_att_mtu(cm.ptr, cs)
 	if mtu < 0 {
-		return 0, fmt.Errorf("failed to determine ATT MTU: uuid=%s", a.String())
+		return 0, fmt.Errorf("failed to determine ATT MTU: device not found: uuid=%s", a.String())
 	}
 
 	return int(mtu), nil
@@ -140,7 +214,7 @@ func (cm *CentralMgr) discoverCharacteristics(a ble.Addr, svcID uintptr, charact
 		carr := C.malloc(C.size_t(len(characteristicUUIDs)) * C.size_t(elemSz))
 		defer C.free(carr)
 
-		garr := (*[1<<30 - 1]*C.char)(carr)
+		garr := (*[1000]*C.char)(carr)
 		for i, u := range characteristicUUIDs {
 			garr[i] = C.CString(u.String())
 		}

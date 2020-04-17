@@ -1,9 +1,22 @@
 #import <Foundation/Foundation.h>
 #import <CoreBluetooth/CoreBluetooth.h>
+#import <CoreLocation/CoreLocation.h>
 #import "bt.h"
 
 // cb.m: C functions for interfacing with CoreBluetooth.  This is necessary
 // because Go code cannot execute some objective C constructs directly.
+
+CMgr *
+cb_alloc_cmgr(void)
+{
+    return [[CMgr alloc] init];
+}
+
+uintptr_t
+cb_cmgr_id(void *cm)
+{
+    return [(CMgr *)cm ID];
+}
 
 void
 cb_scan(void *cm, bool allow_dup)
@@ -20,7 +33,7 @@ cb_stop_scan(void *cm)
 int
 cb_connect(void *cm, const char *peer_uuid)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     int rc = [(CMgr *)cm connect:nsuuid];
 
     [nsuuid release];
@@ -30,7 +43,7 @@ cb_connect(void *cm, const char *peer_uuid)
 int
 cb_att_mtu(void *cm, const char *peer_uuid)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     int rc = [(CMgr *)cm attMTUForPeriphWithUUID:nsuuid];
 
     [nsuuid release];
@@ -40,15 +53,14 @@ cb_att_mtu(void *cm, const char *peer_uuid)
 int
 cb_discover_svcs(void *cm, const char *peer_uuid, const char **svc_uuids, int num_svcs)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
 
     NSMutableArray *arr = NULL;
     if (num_svcs > 0) {
         arr = [[NSMutableArray alloc] init];
         for (int i = 0; i < num_svcs; i++) {
-            NSString *ns = [[NSString alloc] initWithCString:svc_uuids[i] encoding:NSUTF8StringEncoding];
-            CBUUID *cu = [CBUUID UUIDWithString:ns];
-            [arr addObject:cu];
+            CBUUID *uuid = str_to_cbuuid(svc_uuids[i]);
+            [arr addObject:uuid];
         }
     }
 
@@ -62,15 +74,14 @@ cb_discover_svcs(void *cm, const char *peer_uuid, const char **svc_uuids, int nu
 int
 cb_discover_chrs(void *cm, const char *peer_uuid, uintptr_t svc_id, const char **chr_uuids, int num_chrs)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
 
     NSMutableArray *arr = NULL;
     if (num_chrs > 0) {
         arr = [[NSMutableArray alloc] init];
         for (int i = 0; i < num_chrs; i++) {
-            NSString *ns = [[NSString alloc] initWithCString:chr_uuids[i] encoding:NSUTF8StringEncoding];
-            CBUUID *cu = [CBUUID UUIDWithString:ns];
-            [arr addObject:cu];
+            CBUUID *uuid = str_to_cbuuid(chr_uuids[i]);
+            [arr addObject:uuid];
         }
     }
 
@@ -85,7 +96,7 @@ cb_discover_chrs(void *cm, const char *peer_uuid, uintptr_t svc_id, const char *
 int
 cb_discover_dscs(void *cm, const char *peer_uuid, uintptr_t chr_id)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBCharacteristic *chr = (CBCharacteristic *)chr_id;
     int rc = [(CMgr *)cm discoverDescriptors:nsuuid characteristic:chr];
 
@@ -96,7 +107,7 @@ cb_discover_dscs(void *cm, const char *peer_uuid, uintptr_t chr_id)
 int
 cb_read_chr(void *cm, const char *peer_uuid, uintptr_t chr_id)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBCharacteristic *chr = (CBCharacteristic *)chr_id;
     int rc = [(CMgr *)cm readCharacteristic:nsuuid characteristic:chr];
 
@@ -107,7 +118,7 @@ cb_read_chr(void *cm, const char *peer_uuid, uintptr_t chr_id)
 int
 cb_write_chr(void *cm, const char *peer_uuid, uintptr_t chr_id, struct byte_arr *val, bool no_rsp)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBCharacteristic *chr = (CBCharacteristic *)chr_id;
     int rc = [(CMgr *)cm writeCharacteristic:nsuuid characteristic:chr value:val noResponse:no_rsp];
 
@@ -118,7 +129,7 @@ cb_write_chr(void *cm, const char *peer_uuid, uintptr_t chr_id, struct byte_arr 
 int
 cb_read_dsc(void *cm, const char *peer_uuid, uintptr_t dsc_id)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBDescriptor *dsc = (CBDescriptor *)dsc_id;
     int rc = [(CMgr *)cm readDescriptor:nsuuid descriptor:dsc];
 
@@ -129,7 +140,7 @@ cb_read_dsc(void *cm, const char *peer_uuid, uintptr_t dsc_id)
 int
 cb_write_dsc(void *cm, const char *peer_uuid, uintptr_t dsc_id, struct byte_arr *val)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBDescriptor *dsc = (CBDescriptor *)dsc_id;
     int rc = [(CMgr *)cm writeDescriptor:nsuuid descriptor:dsc value:val];
 
@@ -140,7 +151,7 @@ cb_write_dsc(void *cm, const char *peer_uuid, uintptr_t dsc_id, struct byte_arr 
 int
 cb_subscribe(void *cm, const char *peer_uuid, uintptr_t chr_id)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBCharacteristic *chr = (CBCharacteristic *)chr_id;
     int rc = [(CMgr *)cm subscribe:nsuuid characteristic:chr];
 
@@ -151,7 +162,7 @@ cb_subscribe(void *cm, const char *peer_uuid, uintptr_t chr_id)
 int
 cb_unsubscribe(void *cm, const char *peer_uuid, uintptr_t chr_id)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     CBCharacteristic *chr = (CBCharacteristic *)chr_id;
     int rc = [(CMgr *)cm unsubscribe:nsuuid characteristic:chr];
 
@@ -162,7 +173,7 @@ cb_unsubscribe(void *cm, const char *peer_uuid, uintptr_t chr_id)
 int
 cb_read_rssi(void *cm, const char *peer_uuid)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     int rc = [(CMgr *)cm readRSSI:nsuuid];
 
     [nsuuid release];
@@ -172,21 +183,15 @@ cb_read_rssi(void *cm, const char *peer_uuid)
 int
 cb_cancel_connection(void *cm, const char *peer_uuid)
 {
-    NSUUID *nsuuid = uuid_from_str(peer_uuid);
+    NSUUID *nsuuid = str_to_nsuuid(peer_uuid);
     int rc = [(CMgr *)cm cancelConnection:nsuuid];
 
     [nsuuid release];
     return rc;
 }
 
-uintptr_t
-cb_cmgr_id(void *cm)
+void
+cb_destroy_cmgr(void *cm)
 {
-    return [(CMgr *)cm ID];
-}
-
-CMgr *
-cb_alloc_cmgr(void)
-{
-    return [[CMgr alloc] init];
+    [(CMgr *)cm release];
 }

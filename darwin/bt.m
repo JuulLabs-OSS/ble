@@ -6,13 +6,16 @@ dispatch_queue_t bt_queue;
 static bool bt_loop_active;
 
 /**
- * Starts a thread that processes CoreBluetooth events from the queue.
+ * Starts a thread that processes CoreBluetooth events from the BT queue.
+ *
+ * @return                      false if the thread was already started;
+ *                              true if this call started a new thread.
  */
-void
+bool
 bt_start()
 {
     if (bt_loop_active) {
-        return;
+        return false;
     }
     bt_loop_active = true;
 
@@ -26,6 +29,8 @@ bt_start()
                     beforeDate:[NSDate distantFuture]];
         } while (bt_loop_active && !done);
     });
+
+    return true;
 }
 
 void
@@ -38,7 +43,7 @@ void
 bt_init()
 {
     // XXX: I have no idea why a separate queue is required here.  When I
-    // attempted to use the default queue, the run loop did not receive any
+    // attempt to use the default queue, the run loop does not receive any
     // events.
     if (bt_queue == NULL) {
         bt_queue = dispatch_queue_create("bt_queue", NULL);

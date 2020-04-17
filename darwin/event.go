@@ -75,7 +75,7 @@ type eventDisconnected struct {
 	reason int
 }
 
-type eventListener struct {
+type centralEventListener struct {
 	svcsDiscovered chan *eventSvcsDiscovered
 	chrsDiscovered chan *eventChrsDiscovered
 	dscsDiscovered chan *eventDscsDiscovered
@@ -88,8 +88,8 @@ type eventListener struct {
 	disconnected   chan *eventDisconnected
 }
 
-func newEventListener() *eventListener {
-	return &eventListener{
+func newCentralEventListener() *centralEventListener {
+	return &centralEventListener{
 		svcsDiscovered: make(chan *eventSvcsDiscovered),
 		chrsDiscovered: make(chan *eventChrsDiscovered),
 		dscsDiscovered: make(chan *eventDscsDiscovered),
@@ -101,4 +101,17 @@ func newEventListener() *eventListener {
 		rssiRead:       make(chan *eventRSSIRead),
 		disconnected:   make(chan *eventDisconnected),
 	}
+}
+
+func (evl *centralEventListener) Close() {
+	close(evl.svcsDiscovered)
+	close(evl.chrsDiscovered)
+	close(evl.dscsDiscovered)
+	close(evl.chrRead)
+	close(evl.chrWritten)
+	close(evl.dscRead)
+	close(evl.dscWritten)
+	close(evl.notifyChanged)
+	close(evl.rssiRead)
+	close(evl.disconnected)
 }

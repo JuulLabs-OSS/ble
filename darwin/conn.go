@@ -22,7 +22,7 @@ func newConn(d *Device, a ble.Addr, txMTU int) *conn {
 		chrReads:  make(map[string]chan *eventChrRead),
 
 		rspc: make(chan msg),
-		evl:  newEventListener(),
+		evl:  newCentralEventListener(),
 	}
 
 	go func() {
@@ -44,7 +44,7 @@ type conn struct {
 	done  chan struct{}
 
 	rspc chan msg
-	evl  *eventListener
+	evl  *centralEventListener
 
 	notifiers map[uint16]ble.Notifier // central connection only
 
@@ -93,7 +93,9 @@ func (c *conn) Read(b []byte) (int, error) {
 func (c *conn) Write(b []byte) (int, error) {
 	return 0, nil
 }
+
 func (c *conn) Close() error {
+	c.evl.Close()
 	return nil
 }
 

@@ -20,13 +20,11 @@ func (d *Device) SetDisconnectedHandler(f func(evt.DisconnectionComplete)) error
 
 // SetPeripheralRole configures the device to perform Peripheral tasks.
 func (d *Device) SetPeripheralRole() error {
-	d.role = 1
 	return nil
 }
 
 // SetCentralRole configures the device to perform Central tasks.
 func (d *Device) SetCentralRole() error {
-	d.role = 0
 	return nil
 }
 

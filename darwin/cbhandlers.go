@@ -3,12 +3,12 @@ package darwin
 // CBHandlers: Go handlers for asynchronous CoreBluetooth callbacks.
 
 /*
+// See cutil.go for C compiler flags.
 #import "bt.h"
 */
 import "C"
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"unsafe"
@@ -17,16 +17,22 @@ import (
 )
 
 //export BTStateChanged
-func BTStateChanged(enabled C.int, msg *C.char) {
-	btStateCh <- BTState{
+func BTStateChanged(mgrID C.uintptr_t, enabled C.int, msg *C.char) {
+	id := uintptr(mgrID)
+	state := BTState{
 		Enabled: enabled != 0,
 		Msg:     C.GoString(msg),
+	}
+
+	found := cmgrStateChanged(id, state)
+	if !found {
+		log.Printf("state change event for unknown manager: id=%d state=%+v", id, state)
 	}
 }
 
 //export BTPeripheralDiscovered
-func BTPeripheralDiscovered(cmgrID C.uintptr_t, dp *C.struct_discovered_peripheral) {
-	d := cmgrIDToDev(cmgrID)
+func BTPeripheralDiscovered(cmgrID C.uintptr_t, dp *C.struct_discovered_prph) {
+	d := findCmgr(cmgrID)
 	if d == nil || d.advHandler == nil {
 		return
 	}
@@ -37,6 +43,14 @@ func BTPeripheralDiscovered(cmgrID C.uintptr_t, dp *C.struct_discovered_peripher
 		mfgData:     byteArrToByteSlice(dp.mfg_data),
 		powerLevel:  int(dp.power_level),
 		connectable: dp.connectable != 0,
+	}
+
+	var err error
+
+	a.peerUUID, err = ble.Parse(C.GoString(dp.peer_uuid))
+	if err != nil {
+		log.Printf("BTPeripheralDiscovered failed: %v", err)
+		return
 	}
 
 	for i := 0; i < int(dp.num_svc_uuids); i++ {
@@ -67,17 +81,12 @@ func BTPeripheralDiscovered(cmgrID C.uintptr_t, dp *C.struct_discovered_peripher
 		})
 	}
 
-	ubytes := byteArrToByteSlice(dp.peer_uuid)
-	s := uuidStrWithDashes(hex.EncodeToString(ubytes))
-
-	a.peerUUID = ble.NewAddr(s)
-
 	go d.advHandler(a)
 }
 
 //export BTPeripheralConnected
 func BTPeripheralConnected(cmgrID C.uintptr_t, uuidStr *C.char, status C.int) {
-	d := cmgrIDToDev(cmgrID)
+	d := findCmgr(cmgrID)
 	if d == nil {
 		log.Printf("BTPeripheralConnected failed: device not found: ID=%v", cmgrID)
 		return
@@ -99,7 +108,7 @@ func BTPeripheralConnected(cmgrID C.uintptr_t, uuidStr *C.char, status C.int) {
 
 //export BTPeripheralDisconnected
 func BTPeripheralDisconnected(cmgrID C.uintptr_t, uuidStr *C.char, reason C.int) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTPeripheralDisconnected failed: %v", err)
 		return
@@ -111,8 +120,10 @@ func BTPeripheralDisconnected(cmgrID C.uintptr_t, uuidStr *C.char, reason C.int)
 }
 
 //export BTServicesDiscovered
-func BTServicesDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, svcs *C.struct_service, numSvcs C.int) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+func BTServicesDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int,
+	svcs *C.struct_discovered_svc, numSvcs C.int) {
+
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTServicesDiscovered failed: %v", err)
 		return
@@ -129,7 +140,7 @@ func BTServicesDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, svc
 
 	for i := 0; i < int(numSvcs); i++ {
 		elem := cArrGetAddr(unsafe.Pointer(svcs), unsafe.Sizeof(*svcs), i)
-		svc := (*C.struct_service)(elem)
+		svc := (*C.struct_discovered_svc)(elem)
 
 		svcUUID, err := ble.Parse(C.GoString(svc.uuid))
 		if err != nil {
@@ -149,9 +160,9 @@ func BTServicesDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, svc
 
 //export BTCharacteristicsDiscovered
 func BTCharacteristicsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int,
-	chrs *C.struct_characteristic, numChrs C.int) {
+	chrs *C.struct_discovered_chr, numChrs C.int) {
 
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTCharacteristicsDiscovered failed: %v", err)
 		return
@@ -168,7 +179,7 @@ func BTCharacteristicsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.i
 
 	for i := 0; i < int(numChrs); i++ {
 		elem := cArrGetAddr(unsafe.Pointer(chrs), unsafe.Sizeof(*chrs), i)
-		chr := (*C.struct_characteristic)(elem)
+		chr := (*C.struct_discovered_chr)(elem)
 
 		chrUUID, err := ble.Parse(C.GoString(chr.uuid))
 		if err != nil {
@@ -189,9 +200,9 @@ func BTCharacteristicsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.i
 
 //export BTDescriptorsDiscovered
 func BTDescriptorsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int,
-	dscs *C.struct_descriptor, numDscs C.int) {
+	dscs *C.struct_discovered_dsc, numDscs C.int) {
 
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTDescriptorsDiscovered failed: %v", err)
 		return
@@ -208,7 +219,7 @@ func BTDescriptorsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int,
 
 	for i := 0; i < int(numDscs); i++ {
 		elem := cArrGetAddr(unsafe.Pointer(dscs), unsafe.Sizeof(*dscs), i)
-		dsc := (*C.struct_descriptor)(elem)
+		dsc := (*C.struct_discovered_dsc)(elem)
 
 		dscUUID, err := ble.Parse(C.GoString(dsc.uuid))
 		if err != nil {
@@ -230,7 +241,7 @@ func BTDescriptorsDiscovered(cmgrID C.uintptr_t, uuidStr *C.char, status C.int,
 func BTCharacteristicRead(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, chrUUID *C.char,
 	chrVal *C.struct_byte_arr) {
 
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTCharacteristicRead failed: %v", err)
 		return
@@ -262,7 +273,7 @@ func BTCharacteristicRead(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, chr
 
 //export BTCharacteristicWritten
 func BTCharacteristicWritten(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, chrUUID *C.char) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTCharacteristicWritten failed: %v", err)
 		return
@@ -292,7 +303,7 @@ func BTCharacteristicWritten(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, 
 
 //export BTDescriptorRead
 func BTDescriptorRead(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, dscUUID *C.char, dscVal *C.struct_byte_arr) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTDescriptorRead failed: %v", err)
 		return
@@ -324,7 +335,7 @@ func BTDescriptorRead(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, dscUUID
 
 //export BTDescriptorWritten
 func BTDescriptorWritten(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, dscUUID *C.char) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTDescriptorWritten failed: %v", err)
 		return
@@ -354,7 +365,7 @@ func BTDescriptorWritten(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, dscU
 
 //export BTNotificationStateChanged
 func BTNotificationStateChanged(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, chrUUID *C.char, enabled C.bool) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTNotificationStateChanged failed: %v", err)
 		return
@@ -385,7 +396,7 @@ func BTNotificationStateChanged(cmgrID C.uintptr_t, uuidStr *C.char, status C.in
 
 //export BTRSSIRead
 func BTRSSIRead(cmgrID C.uintptr_t, uuidStr *C.char, status C.int, rssi C.int) {
-	_, c, err := cmgrIDToDevAndConn(cmgrID, uuidStr)
+	_, c, err := findCmgrAndConn(cmgrID, uuidStr)
 	if err != nil {
 		log.Printf("BTRSSIRead failed: %v", err)
 		return

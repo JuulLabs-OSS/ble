@@ -2,24 +2,7 @@ package darwin
 
 import (
 	"github.com/JuulLabs-OSS/ble"
-	"github.com/raff/goble/xpc"
 )
-
-/*
-type Advertisement interface {
-	X LocalName() string
-	X ManufacturerData() []byte
-	X ServiceData() []ServiceData
-	X Services() []UUID
-	- OverflowService() []UUID
-	X TxPowerLevel() int
-	X Connectable() bool
-	- SolicitedService() []UUID
-
-	X RSSI() int
-	Addr() Addr
-}
-*/
 
 type adv struct {
 	localName   string
@@ -30,9 +13,6 @@ type adv struct {
 	svcUUIDs    []ble.UUID
 	svcData     []ble.ServiceData
 	peerUUID    ble.Addr
-
-	args xpc.Dict
-	ad   xpc.Dict
 }
 
 func (a *adv) LocalName() string {

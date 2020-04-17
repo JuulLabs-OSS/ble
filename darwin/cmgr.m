@@ -20,6 +20,13 @@ init
     return self;
 }
 
+- (void)
+dealloc
+{
+    [_manager release];
+    [super dealloc];
+}
+
 /**
  * Retrieves the CMgr's ID.  Used for passing a CMgr between objc and Go code.
  */
@@ -35,12 +42,12 @@ ID
 - (void)
 centralManagerDidUpdateState:(CBCentralManager *)cm
 {
-    assert(cm == _manager);
-
     int enabled;
     char *msg;
 
-    switch ([_manager state]) {
+    assert(cm == _manager);
+
+    switch ([cm state]) {
     case CBManagerStateUnsupported:
         enabled = 0;
         msg = "The platform/hardware doesn't support Bluetooth Low Energy";
@@ -67,7 +74,7 @@ centralManagerDidUpdateState:(CBCentralManager *)cm
         break;
     }
 
-    BTStateChanged(enabled, msg);
+    BTStateChanged([self ID], enabled, msg);
 }
 
 /**
@@ -79,7 +86,7 @@ didDiscoverPeripheral:(CBPeripheral *)prph
     advertisementData:(NSDictionary *)advData
     RSSI:(NSNumber *)RSSI
 {
-    struct discovered_peripheral dp = {0};
+    struct discovered_prph dp = {0};
 
     dp.rssi = [RSSI intValue];
     dp.local_name = dict_string(advData, CBAdvertisementDataLocalNameKey);
@@ -115,10 +122,7 @@ didDiscoverPeripheral:(CBPeripheral *)prph
     dp.num_svc_data = [keys count];
 
     const NSUUID *uuid = [prph identifier];
-    uint8_t bytes[16];
-    [uuid getUUIDBytes:bytes];
-    dp.peer_uuid.data = bytes;
-    dp.peer_uuid.length = sizeof bytes;
+    dp.peer_uuid = [[uuid UUIDString] UTF8String];
 
     BTPeripheralDiscovered([self ID], &dp);
 }
@@ -183,11 +187,11 @@ didDiscoverServices:(NSError *)err
         status = [err code];
     }
 
-    struct service svcs[[nsarr count]];
+    struct discovered_svc svcs[[nsarr count]];
     for (int i = 0; i < [nsarr count]; i++) {
         CBService *cbsvc = [nsarr objectAtIndex:i];
 
-        svcs[i] = (struct service) {
+        svcs[i] = (struct discovered_svc) {
             .id = (uintptr_t)cbsvc,
             .uuid = [[[cbsvc UUID] UUIDString] UTF8String],
         };
@@ -214,11 +218,11 @@ didDiscoverCharacteristicsForService:(CBService *)svc
         status = [err code];
     }
 
-    struct characteristic chrs[[nsarr count]];
+    struct discovered_chr chrs[[nsarr count]];
     for (int i = 0; i < [nsarr count]; i++) {
         CBCharacteristic *cbchr = [nsarr objectAtIndex:i];
 
-        chrs[i] = (struct characteristic) {
+        chrs[i] = (struct discovered_chr) {
             .id = (uintptr_t)cbchr,
             .uuid = [[[cbchr UUID] UUIDString] UTF8String],
             .properties = (uint8_t)[cbchr properties],
@@ -246,11 +250,11 @@ didDiscoverDescriptorsForCharacteristic:(CBCharacteristic *)chr
         status = [err code];
     }
 
-    struct descriptor dscs[[nsarr count]];
+    struct discovered_dsc dscs[[nsarr count]];
     for (int i = 0; i < [nsarr count]; i++) {
         CBDescriptor *cbdsc = [nsarr objectAtIndex:i];
 
-        dscs[i] = (struct descriptor) {
+        dscs[i] = (struct discovered_dsc) {
             .id = (uintptr_t)cbdsc,
             .uuid = [[[cbdsc UUID] UUIDString] UTF8String],
         };
@@ -321,8 +325,8 @@ didUpdateValueForDescriptor:(CBDescriptor *)dsc
 }
 
 /**
- * Called when a peripheral responds a write request from the central manager's
- * write descriptor request.
+ * Called when a peripheral responds to a write request from the central
+ * manager's write descriptor request.
  */
 - (void)        peripheral:(CBPeripheral *)prph 
 didWriteValueForDescriptor:(CBDescriptor *)dsc 
@@ -419,12 +423,15 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Attempts to connect to the peripheral with the specified UUID.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) connect:(NSUUID *)peerUUID
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [_manager connectPeripheral:periph options:@{@"kCBConnectOptionNotifyOnDisconnection": @1}];
@@ -434,12 +441,15 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Cancels a connect operation in progress.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int)cancelConnection:(NSUUID *)peerUUID
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [_manager cancelPeripheralConnection:periph];
@@ -448,6 +458,9 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Retrieves the ATT MTU a connected peer can receive.
+ *
+ * @return                      MTU on success;
+ *                              negative number if peripheral not found.
  */
 - (int) attMTUForPeriphWithUUID:(NSUUID *)peerUUID
 {
@@ -464,13 +477,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
  * Discovers the services that the specified peripheral supports.  The array of
  * CBUUIDs specifies the services to discover, or NULL to discover all
  * services.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) discoverServices:(NSUUID *)peerUUID
     services:(NSArray<CBUUID *> *)svcUUIDs
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph discoverServices:svcUUIDs];
@@ -481,6 +497,9 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
  * Discovers characterstics belonging to the specified peripheral service.  The
  * array of CBUUIDs specifies the characteristics to discover, or NULL to
  * discover all characteristics.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) discoverCharacteristics:(NSUUID *)peerUUID
                         service:(CBService *)svc
@@ -488,7 +507,7 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph discoverCharacteristics:chrUUIDs forService:svc];
@@ -497,13 +516,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Discovers descriptors belonging to the specified peripheral characteristic.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) discoverDescriptors:(NSUUID *)peerUUID
              characteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph discoverDescriptorsForCharacteristic:chr];
@@ -512,13 +534,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Reads a peripheral's characteristic.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) readCharacteristic:(NSUUID *)peerUUID 
             characteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph readValueForCharacteristic:chr];
@@ -527,6 +552,9 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Writes a peripheral's characteristic.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) writeCharacteristic:(NSUUID *)peerUUID 
              characteristic:(CBCharacteristic *)chr
@@ -535,7 +563,7 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     CBCharacteristicWriteType type;
@@ -554,13 +582,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Reads a peripheral's descriptor.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) readDescriptor:(NSUUID *)peerUUID 
             descriptor:(CBDescriptor *)dsc
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph readValueForDescriptor:dsc];
@@ -569,6 +600,9 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Writes a peripheral's descriptor.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) writeDescriptor:(NSUUID *)peerUUID 
              descriptor:(CBDescriptor *)dsc
@@ -576,7 +610,7 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     NSData *nsdata = byte_arr_to_nsdata(val);
@@ -589,13 +623,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 /**
  * Subscribes to notifications or indications for a peripheral's
  * characteristic.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) subscribe:(NSUUID *)peerUUID
    characteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph setNotifyValue:YES forCharacteristic:chr];
@@ -605,13 +642,16 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 /**
  * Unsubscribes to notifications or indications for a peripheral's
  * characteristic.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int) unsubscribe:(NSUUID *)peerUUID
      characteristic:(CBCharacteristic *)chr
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph setNotifyValue:NO forCharacteristic:chr];
@@ -620,12 +660,15 @@ didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)chr
 
 /**
  * Retrieves the RSSI of the connection to the specified peripheral.
+ *
+ * @return                      0 on success;
+ *                              nonzero if peripheral not found.
  */
 - (int)readRSSI:(NSUUID *)peerUUID
 {
     CBPeripheral *periph = [self peripheralWithUUID:peerUUID];
     if (periph == NULL) {
-        return ENOENT;
+        return -1;
     }
 
     [periph readRSSI];

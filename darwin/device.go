@@ -2,6 +2,7 @@ package darwin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/JuulLabs-OSS/ble"
@@ -18,38 +19,22 @@ type connectResult struct {
 type Device struct {
 	cm *CentralMgr
 
-	role int // 1: peripheralManager (server), 0: centralManager (client)
-
-	rspc chan msg
-
 	conns    map[string]*conn
 	connLock sync.Mutex
 
-	// Only used in client/centralManager implementation
 	advHandler ble.AdvHandler
 	chConn     chan *connectResult
-
-	// Only used in server/peripheralManager implementation
-	chars map[int]*ble.Characteristic
-	base  int
 }
 
 // NewDevice returns a BLE device.
 func NewDevice(opts ...ble.Option) (*Device, error) {
 	d := &Device{
-		rspc:   make(chan msg),
+		cm:     NewCentralMgr(),
 		conns:  make(map[string]*conn),
 		chConn: make(chan *connectResult),
-		chars:  make(map[int]*ble.Characteristic),
-		base:   1,
 	}
-	if err := d.Option(opts...); err != nil {
-		return nil, err
-	}
-	d.cm = NewCentralMgr(d)
 
-	// Make sure CoreBluetooth is running.
-	err := StartBTLoop()
+	err := d.cm.Start(d)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +44,7 @@ func NewDevice(opts ...ble.Option) (*Device, error) {
 
 // Option sets the options specified.
 func (d *Device) Option(opts ...ble.Option) error {
-	var err error
-	for _, opt := range opts {
-		err = opt(d)
-	}
-	return err
+	return nil
 }
 
 // Scan ...
@@ -99,7 +80,17 @@ func (d *Device) Dial(ctx context.Context, a ble.Addr) (ble.Client, error) {
 
 // Stop ...
 func (d *Device) Stop() error {
+	d.cm.Stop()
 	return nil
+}
+
+func (d *Device) closeConns() {
+	d.connLock.Lock()
+	defer d.connLock.Unlock()
+
+	for _, c := range d.conns {
+		c.Close()
+	}
 }
 
 func (d *Device) findConn(a ble.Addr) *conn {
@@ -135,6 +126,11 @@ func (d *Device) connectSuccess(a ble.Addr) {
 	d.chConn <- &connectResult{
 		conn: c,
 	}
+
+	go func() {
+		<-c.Disconnected()
+		d.delConn(c.addr)
+	}()
 }
 
 func (d *Device) connectFail(err error) {
@@ -151,29 +147,29 @@ func (d *Device) delConn(a ble.Addr) {
 }
 
 func (d *Device) AddService(svc *ble.Service) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) RemoveAllServices() error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) SetServices(svcs []*ble.Service) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) Advertise(ctx context.Context, adv ble.Advertisement) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) AdvertiseNameAndServices(ctx context.Context, name string, uuids ...ble.UUID) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) AdvertiseMfgData(ctx context.Context, id uint16, b []byte) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) AdvertiseServiceData16(ctx context.Context, id uint16, b []byte) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) AdvertiseIBeaconData(ctx context.Context, b []byte) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }
 func (d *Device) AdvertiseIBeacon(ctx context.Context, u ble.UUID, major, minor uint16, pwr int8) error {
-	return ble.ErrNotImplemented
+	return errors.New("Not supported")
 }

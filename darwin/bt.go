@@ -16,35 +16,25 @@ type BTState struct {
 	Msg     string
 }
 
-var btStateCh chan BTState
-
-func StartBTLoop() error {
-	if btStateCh != nil {
-		// Already running.
-		return nil
-	}
-	btStateCh = make(chan BTState)
-
+func StartBTLoop(ch chan BTState) error {
 	C.bt_start()
 
 	// Block until initial state change.  If Bluetooth is disabled, fail
 	// immediately.
-	state := <-btStateCh
+	state := <-ch
 	if !state.Enabled {
-		StopBTLoop()
-		return fmt.Errorf("failed to start CoreBluetooth: %s", state.Msg)
+		return fmt.Errorf("failed to start Bluetooth client: %s", state.Msg)
 	}
 
 	// Listen for and log subsequent state changes in the background.
 	go func() {
 		for {
-			state, ok := <-btStateCh
+			state, ok := <-ch
 			if !ok {
-				btStateCh = nil
 				return
 			}
 
-			log.Printf("CoreBluetooth state change: %s", state.Msg)
+			log.Printf("Bluetooth state change: %s", state.Msg)
 		}
 	}()
 
@@ -53,9 +43,4 @@ func StartBTLoop() error {
 
 func StopBTLoop() {
 	C.bt_stop()
-	close(btStateCh)
-}
-
-func BTInit() {
-	C.bt_init()
 }
