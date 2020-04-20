@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/cbgo"
 
 	"sync"
 )
@@ -17,27 +18,42 @@ type connectResult struct {
 
 // Device is either a Peripheral or Central device.
 type Device struct {
-	cm *CentralMgr
+	cbgo.CentralManagerDelegateBase
+
+	cm cbgo.CentralManager
 
 	conns    map[string]*conn
 	connLock sync.Mutex
 
 	advHandler ble.AdvHandler
 	chConn     chan *connectResult
+	chState    chan struct{}
 }
 
 // NewDevice returns a BLE device.
 func NewDevice(opts ...ble.Option) (*Device, error) {
 	d := &Device{
-		cm:     NewCentralMgr(),
-		conns:  make(map[string]*conn),
-		chConn: make(chan *connectResult),
+		cm:      cbgo.NewCentralManager(nil),
+		conns:   make(map[string]*conn),
+		chConn:  make(chan *connectResult),
+		chState: make(chan struct{}),
 	}
 
-	err := d.cm.Start(d)
-	if err != nil {
-		return nil, err
+	d.cm.SetDelegate(d)
+	<-d.chState
+	if d.cm.State() != cbgo.ManagerStatePoweredOn {
+		return nil, fmt.Errorf("central manager has invalid state: have=%d want=%d: is Bluetooth turned on?",
+			d.cm.State(), cbgo.ManagerStatePoweredOn)
 	}
+
+	go func() {
+		for {
+			_, ok := <-d.chState
+			if !ok {
+				break
+			}
+		}
+	}()
 
 	return d, nil
 }
@@ -51,7 +67,9 @@ func (d *Device) Option(opts ...ble.Option) error {
 func (d *Device) Scan(ctx context.Context, allowDup bool, h ble.AdvHandler) error {
 	d.advHandler = h
 
-	d.cm.Scan(!allowDup)
+	d.cm.Scan(nil, &cbgo.CentralManagerScanOpts{
+		AllowDuplicates: allowDup,
+	})
 
 	<-ctx.Done()
 	d.cm.StopScan()
@@ -61,10 +79,17 @@ func (d *Device) Scan(ctx context.Context, allowDup bool, h ble.AdvHandler) erro
 
 // Dial ...
 func (d *Device) Dial(ctx context.Context, a ble.Addr) (ble.Client, error) {
-	err := d.cm.Connect(a)
+	uuid, err := cbgo.ParseUUID(uuidStrWithDashes(a.String()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial failed: invalid peer address: %s", a)
 	}
+
+	prphs := d.cm.RetrievePeripheralsWithIdentifiers([]cbgo.UUID{uuid})
+	if len(prphs) == 0 {
+		return nil, fmt.Errorf("dial failed: no peer with address: %s", a)
+	}
+
+	d.cm.Connect(prphs[0], nil)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -80,7 +105,6 @@ func (d *Device) Dial(ctx context.Context, a ble.Addr) (ble.Client, error) {
 
 // Stop ...
 func (d *Device) Stop() error {
-	d.cm.Stop()
 	return nil
 }
 
@@ -100,7 +124,41 @@ func (d *Device) findConn(a ble.Addr) *conn {
 	return d.conns[a.String()]
 }
 
-func (d *Device) connectSuccess(a ble.Addr) {
+func (d *Device) DidUpdateState(cmgr cbgo.CentralManager) {
+	d.chState <- struct{}{}
+}
+
+func (d *Device) DidDiscoverPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral, advFields cbgo.AdvFields, rssi int) {
+	if d.advHandler == nil {
+		return
+	}
+
+	a := &adv{
+		localName: advFields.LocalName,
+		rssi:      int(rssi),
+		mfgData:   advFields.ManufacturerData,
+	}
+	if advFields.Connectable != nil {
+		a.connectable = *advFields.Connectable
+	}
+	if advFields.TxPowerLevel != nil {
+		a.powerLevel = *advFields.TxPowerLevel
+	}
+	for _, u := range advFields.ServiceUUIDs {
+		a.svcUUIDs = append(a.svcUUIDs, ble.UUID(u))
+	}
+	for _, sd := range advFields.ServiceData {
+		a.svcData = append(a.svcData, ble.ServiceData{
+			UUID: ble.UUID(sd.UUID),
+			Data: sd.Data,
+		})
+	}
+	a.peerUUID = ble.UUID(prph.Identifier())
+
+	d.advHandler(a)
+}
+
+func (d *Device) DidConnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral) {
 	d.connLock.Lock()
 	defer d.connLock.Unlock()
 
@@ -110,18 +168,14 @@ func (d *Device) connectSuccess(a ble.Addr) {
 		}
 	}
 
+	a := ble.Addr(prph.Identifier())
+
 	if d.conns[a.String()] != nil {
 		fail(fmt.Errorf("failed to add connection: already exists: addr=%s", a.String()))
 		return
 	}
 
-	txMTU, err := d.cm.attMTU(a)
-	if err != nil {
-		fail(fmt.Errorf("failed to add connection: %v", err))
-		return
-	}
-
-	c := newConn(d, a, txMTU)
+	c := newConn(d, prph)
 	d.conns[a.String()] = c
 	d.chConn <- &connectResult{
 		conn: c,

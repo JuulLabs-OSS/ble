@@ -7,14 +7,16 @@ import (
 	"sync"
 
 	"github.com/JuulLabs-OSS/ble"
+	"github.com/JuulLabs-OSS/cbgo"
 )
 
-func newConn(d *Device, a ble.Addr, txMTU int) *conn {
+func newConn(d *Device, prph cbgo.Peripheral) *conn {
 	c := &conn{
 		dev:   d,
 		rxMTU: 23,
-		txMTU: txMTU,
-		addr:  a,
+		// -3 to account for WriteCommand base.
+		txMTU: prph.MaximumWriteValueLength(false) - 3,
+		addr:  ble.NewAddr(prph.Identifier().String()),
 		done:  make(chan struct{}),
 
 		notifiers: make(map[uint16]ble.Notifier),
@@ -23,6 +25,8 @@ func newConn(d *Device, a ble.Addr, txMTU int) *conn {
 
 		rspc: make(chan msg),
 		evl:  newCentralEventListener(),
+
+		prph: prph,
 	}
 
 	go func() {
@@ -45,6 +49,8 @@ type conn struct {
 
 	rspc chan msg
 	evl  *centralEventListener
+
+	prph cbgo.Peripheral
 
 	notifiers map[uint16]ble.Notifier // central connection only
 
@@ -104,7 +110,7 @@ func (c *conn) Disconnected() <-chan struct{} {
 	return c.done
 }
 
-func (c *conn) processChrRead(ev *eventChrRead) {
+func (c *conn) processChrRead(ev *eventChrRead, cbchr cbgo.Characteristic) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -119,7 +125,7 @@ func (c *conn) processChrRead(ev *eventChrRead) {
 
 	s := c.subs[uuidStr]
 	if s != nil {
-		s.fn(ev.value)
+		s.fn(cbchr.Value())
 		found = true
 	}
 

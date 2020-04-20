@@ -93,9 +93,6 @@ type Service struct {
 
 	Handle    uint16
 	EndHandle uint16
-
-	// (macOS only) The address of the CBService.
-	ID uintptr
 }
 
 // AddCharacteristic adds a characteristic to a service.
@@ -134,9 +131,6 @@ type Characteristic struct {
 	Handle      uint16
 	ValueHandle uint16
 	EndHandle   uint16
-
-	// (macOS only) The address of the CBCharacteristic.
-	ID uintptr
 }
 
 // AddDescriptor adds a descriptor to a characteristic.
@@ -212,9 +206,6 @@ type Descriptor struct {
 
 	ReadHandler  ReadHandler
 	WriteHandler WriteHandler
-
-	// (macOS only) The address of the CBDescriptor.
-	ID uintptr
 }
 
 // SetValue makes the descriptor support read requests, and returns a static value.
