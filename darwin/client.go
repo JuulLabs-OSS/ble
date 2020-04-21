@@ -88,9 +88,14 @@ func (cln *Client) DiscoverServices(ss []ble.UUID) ([]*ble.Service, error) {
 
 	cln.conn.prph.DiscoverServices(cbuuids)
 
-	ev := <-cln.conn.evl.svcsDiscovered
-	if ev.err != nil {
-		return nil, ev.err
+	select {
+	case ev := <-cln.conn.evl.svcsDiscovered:
+		if ev.err != nil {
+			return nil, ev.err
+		}
+
+	case <-cln.Disconnected():
+		return nil, fmt.Errorf("disconnected")
 	}
 
 	svcs := []*ble.Service{}
@@ -124,9 +129,14 @@ func (cln *Client) DiscoverCharacteristics(cs []ble.UUID, s *ble.Service) ([]*bl
 	cbuuids := uuidsToCbgoUUIDs(cs)
 	cln.conn.prph.DiscoverCharacteristics(cbuuids, cbsvc)
 
-	ev := <-cln.conn.evl.chrsDiscovered
-	if ev.err != nil {
-		return nil, ev.err
+	select {
+	case ev := <-cln.conn.evl.chrsDiscovered:
+		if ev.err != nil {
+			return nil, ev.err
+		}
+
+	case <-cln.Disconnected():
+		return nil, fmt.Errorf("disconnected")
 	}
 
 	for _, dchr := range cbsvc.Characteristics() {
@@ -153,9 +163,14 @@ func (cln *Client) DiscoverDescriptors(ds []ble.UUID, c *ble.Characteristic) ([]
 		return nil, err
 	}
 
-	ev := <-cln.conn.evl.dscsDiscovered
-	if ev.err != nil {
-		return nil, ev.err
+	select {
+	case ev := <-cln.conn.evl.dscsDiscovered:
+		if ev.err != nil {
+			return nil, ev.err
+		}
+
+	case <-cln.Disconnected():
+		return nil, fmt.Errorf("disconnected")
 	}
 
 	for _, ddsc := range cbchr.Descriptors() {
@@ -183,9 +198,14 @@ func (cln *Client) ReadCharacteristic(c *ble.Characteristic) ([]byte, error) {
 
 	cln.conn.prph.ReadCharacteristic(cbchr)
 
-	ev := <-ch
-	if ev.err != nil {
-		return nil, ev.err
+	select {
+	case ev := <-ch:
+		if ev.err != nil {
+			return nil, ev.err
+		}
+
+	case <-cln.Disconnected():
+		return nil, fmt.Errorf("disconnected")
 	}
 
 	c.Value = cbchr.Value()
@@ -225,9 +245,14 @@ func (cln *Client) ReadDescriptor(d *ble.Descriptor) ([]byte, error) {
 
 	cln.conn.prph.ReadDescriptor(cbdsc)
 
-	ev := <-cln.conn.evl.dscRead
-	if ev.err != nil {
-		return nil, ev.err
+	select {
+	case ev := <-cln.conn.evl.dscRead:
+		if ev.err != nil {
+			return nil, ev.err
+		}
+
+	case <-cln.Disconnected():
+		return nil, fmt.Errorf("disconnected")
 	}
 
 	d.Value = cbdsc.Value()
@@ -247,9 +272,14 @@ func (cln *Client) WriteDescriptor(d *ble.Descriptor, b []byte) error {
 		return err
 	}
 
-	ev := <-cln.conn.evl.dscWritten
-	if ev.err != nil {
-		return ev.err
+	select {
+	case ev := <-cln.conn.evl.dscWritten:
+		if ev.err != nil {
+			return ev.err
+		}
+
+	case <-cln.Disconnected():
+		return fmt.Errorf("disconnected")
 	}
 
 	return nil
@@ -259,12 +289,16 @@ func (cln *Client) WriteDescriptor(d *ble.Descriptor, b []byte) error {
 func (cln *Client) ReadRSSI() int {
 	cln.conn.prph.ReadRSSI()
 
-	ev := <-cln.conn.evl.rssiRead
-	if ev.err != nil {
+	select {
+	case ev := <-cln.conn.evl.rssiRead:
+		if ev.err != nil {
+			return 0
+		}
+		return ev.rssi
+
+	case <-cln.Disconnected():
 		return 0
 	}
-
-	return ev.rssi
 }
 
 // ExchangeMTU set the ATT_MTU to the maximum possible value that can be
@@ -286,10 +320,15 @@ func (cln *Client) Subscribe(c *ble.Characteristic, ind bool, fn ble.Notificatio
 
 	cln.conn.prph.SetNotify(true, cbchr)
 
-	ev := <-cln.conn.evl.notifyChanged
-	if ev.err != nil {
-		cln.conn.delSub(c)
-		return ev.err
+	select {
+	case ev := <-cln.conn.evl.notifyChanged:
+		if ev.err != nil {
+			cln.conn.delSub(c)
+			return ev.err
+		}
+
+	case <-cln.Disconnected():
+		return fmt.Errorf("disconnected")
 	}
 
 	return nil
@@ -305,9 +344,14 @@ func (cln *Client) Unsubscribe(c *ble.Characteristic, ind bool) error {
 
 	cln.conn.prph.SetNotify(false, cbchr)
 
-	ev := <-cln.conn.evl.notifyChanged
-	if ev.err != nil {
-		return ev.err
+	select {
+	case ev := <-cln.conn.evl.notifyChanged:
+		if ev.err != nil {
+			return ev.err
+		}
+
+	case <-cln.Disconnected():
+		return fmt.Errorf("disconnected")
 	}
 
 	cln.conn.delSub(c)
