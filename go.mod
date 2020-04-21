@@ -3,7 +3,8 @@ module github.com/JuulLabs-OSS/ble
 go 1.13
 
 require (
-	github.com/JuulLabs-OSS/cbgo v0.0.0-20200421005649-2500569cc36f // indirect
+	github.com/JuulLabs-OSS/cbgo v0.0.0-20200421065905-1762a9c3147c
+	github.com/mattn/go-colorable v0.1.6 // indirect
 	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect
 	github.com/mgutz/logxi v0.0.0-20161027140823-aebf8a7d67ab
 	github.com/pkg/errors v0.8.1

@@ -187,6 +187,15 @@ func (d *Device) DidConnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Periph
 	}()
 }
 
+func (d *Device) DidDisconnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral, err error) {
+	c := d.findConn(ble.NewAddr(prph.Identifier().String()))
+	if c != nil {
+		c.evl.disconnected <- &eventDisconnected{
+			reason: err.(*cbgo.NSError).Code(),
+		}
+	}
+}
+
 func (d *Device) connectFail(err error) {
 	d.chConn <- &connectResult{
 		err: err,
