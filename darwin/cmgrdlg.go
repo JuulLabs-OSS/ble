@@ -6,7 +6,7 @@
 package darwin
 
 import (
-	"github.com/go-ble/ble"
+	"github.com/JuulLabs-OSS/ble"
 	"github.com/JuulLabs-OSS/cbgo"
 )
 
