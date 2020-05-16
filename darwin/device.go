@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/JuulLabs-OSS/ble"
 	"github.com/JuulLabs-OSS/cbgo"
@@ -44,22 +45,42 @@ func NewDevice(opts ...ble.Option) (*Device, error) {
 		conns: make(map[string]*conn),
 	}
 
-	// Each manager object will receive a state change event as soon as its
-	// delegate is set.  Only proceed if the event indicates Bluetooth is
-	// enabled.
+	// Only proceed if Bluetooth is enabled.
 
+	blockUntilStateChange := func(getState func() cbgo.ManagerState) {
+		if getState() != cbgo.ManagerStateUnknown {
+			return
+		}
+
+		// Wait until state changes or until one second passes (whichever
+		// happens first).
+		for {
+			select {
+			case <-d.evl.stateChanged.Listen():
+				if getState() != cbgo.ManagerStateUnknown {
+					return
+				}
+
+			case <-time.NewTimer(time.Second).C:
+				return
+			}
+		}
+	}
+
+	// Ensure central manager is ready.
 	d.cm.SetDelegate(d)
-	<-d.evl.stateChanged.Listen()
+	blockUntilStateChange(d.cm.State)
 	if d.cm.State() != cbgo.ManagerStatePoweredOn {
 		return nil, fmt.Errorf("central manager has invalid state: have=%d want=%d: is Bluetooth turned on?",
 			d.cm.State(), cbgo.ManagerStatePoweredOn)
 	}
 
+	// Ensure peripheral manager is ready.
 	d.pm.SetDelegate(d)
-	<-d.evl.stateChanged.Listen()
-	if d.cm.State() != cbgo.ManagerStatePoweredOn {
+	blockUntilStateChange(d.pm.State)
+	if d.pm.State() != cbgo.ManagerStatePoweredOn {
 		return nil, fmt.Errorf("peripheral manager has invalid state: have=%d want=%d: is Bluetooth turned on?",
-			d.cm.State(), cbgo.ManagerStatePoweredOn)
+			d.pm.State(), cbgo.ManagerStatePoweredOn)
 	}
 
 	return d, nil
