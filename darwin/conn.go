@@ -10,31 +10,63 @@ import (
 	"github.com/JuulLabs-OSS/cbgo"
 )
 
-func newConn(d *Device, prph cbgo.Peripheral) *conn {
+// newGenConn creates a new generic (role-less) connection.  This should not be
+// called directly; use newCentralConn or newPeripheralConn instead.
+func newGenConn(d *Device, a ble.Addr) (*conn, error) {
 	c := &conn{
 		dev:   d,
 		rxMTU: 23,
-		// -3 to account for WriteCommand base.
-		txMTU: prph.MaximumWriteValueLength(false) - 3,
-		addr:  ble.NewAddr(prph.Identifier().String()),
+		txMTU: 23,
+		addr:  a,
 		done:  make(chan struct{}),
 
-		notifiers: make(map[uint16]ble.Notifier),
-		subs:      make(map[string]*sub),
-		chrReads:  make(map[string]chan *eventChrRead),
+		notifiers: make(map[cbgo.Characteristic]ble.Notifier),
 
-		rspc: make(chan msg),
-		evl:  newCentralEventListener(),
+		subs:     make(map[string]*sub),
+		chrReads: make(map[string]chan error),
+	}
 
-		prph: prph,
+	err := d.addConn(c)
+	if err != nil {
+		return nil, err
 	}
 
 	go func() {
-		<-c.evl.disconnected
-		close(c.done)
+		<-c.done
+		d.delConn(c.addr)
 	}()
 
-	return c
+	return c, nil
+}
+
+// newCentralConn creates a new connection with us acting as central
+// (peer=peripheral).
+func newCentralConn(d *Device, prph cbgo.Peripheral) (*conn, error) {
+	c, err := newGenConn(d, ble.NewAddr(prph.Identifier().String()))
+	if err != nil {
+		return nil, err
+	}
+
+	// -3 to account for WriteCommand base.
+	c.txMTU = prph.MaximumWriteValueLength(false) - 3
+	c.prph = prph
+
+	return c, nil
+}
+
+// newCentralConn creates a new connection with us acting as peripheral
+// (peer=central).
+func newPeripheralConn(d *Device, cent cbgo.Central) (*conn, error) {
+	c, err := newGenConn(d, ble.NewAddr(cent.Identifier().String()))
+	if err != nil {
+		return nil, err
+	}
+
+	// -3 to account for ATT_HANDLE_VALUE_NTF base.
+	c.txMTU = cent.MaximumUpdateValueLength() - 3
+	c.cent = cent
+
+	return c, nil
 }
 
 type conn struct {
@@ -47,15 +79,15 @@ type conn struct {
 	addr  ble.Addr
 	done  chan struct{}
 
-	rspc chan msg
-	evl  *centralEventListener
+	evl clientEventListener
 
 	prph cbgo.Peripheral
+	cent cbgo.Central
 
-	notifiers map[uint16]ble.Notifier // central connection only
+	notifiers map[cbgo.Characteristic]ble.Notifier // central connection only
 
 	subs     map[string]*sub
-	chrReads map[string](chan *eventChrRead)
+	chrReads map[string](chan error)
 }
 
 func (c *conn) Context() context.Context {
@@ -110,16 +142,19 @@ func (c *conn) Disconnected() <-chan struct{} {
 	return c.done
 }
 
-func (c *conn) processChrRead(ev *eventChrRead, cbchr cbgo.Characteristic) {
+// processChrRead handles an incoming read response.  CoreBluetooth does not
+// distinguish explicit reads from unsolicited notifications.  This function
+// identifies which type the incoming message is.
+func (c *conn) processChrRead(err error, cbchr cbgo.Characteristic) {
 	c.RLock()
 	defer c.RUnlock()
 
-	uuidStr := uuidStrWithDashes(ev.uuid.String())
+	uuidStr := uuidStrWithDashes(cbchr.UUID().String())
 	found := false
 
 	ch := c.chrReads[uuidStr]
 	if ch != nil {
-		ch <- ev
+		ch <- err
 		found = true
 	}
 
@@ -134,7 +169,8 @@ func (c *conn) processChrRead(ev *eventChrRead, cbchr cbgo.Characteristic) {
 	}
 }
 
-func (c *conn) addChrReader(char *ble.Characteristic) (chan *eventChrRead, error) {
+// addChrReader starts listening for a solicited read response.
+func (c *conn) addChrReader(char *ble.Characteristic) (chan error, error) {
 	uuidStr := uuidStrWithDashes(char.UUID.String())
 
 	c.Lock()
@@ -144,21 +180,23 @@ func (c *conn) addChrReader(char *ble.Characteristic) (chan *eventChrRead, error
 		return nil, fmt.Errorf("cannot read from the same attribute twice: uuid=%s", uuidStr)
 	}
 
-	ch := make(chan *eventChrRead)
+	ch := make(chan error)
 	c.chrReads[uuidStr] = ch
 
 	return ch, nil
 }
 
+// delChrReader stops listening for a solicited read response.
 func (c *conn) delChrReader(char *ble.Characteristic) {
-	uuidStr := uuidStrWithDashes(char.UUID.String())
-
 	c.Lock()
 	defer c.Unlock()
 
+	uuidStr := uuidStrWithDashes(char.UUID.String())
 	delete(c.chrReads, uuidStr)
 }
 
+// addSub starts listening for unsolicited notifications and indications for a
+// particular characteristic.
 func (c *conn) addSub(char *ble.Characteristic, fn ble.NotificationHandler) {
 	uuidStr := uuidStrWithDashes(char.UUID.String())
 
@@ -175,6 +213,8 @@ func (c *conn) addSub(char *ble.Characteristic, fn ble.NotificationHandler) {
 	}
 }
 
+// delSub stops listening for unsolicited notifications and indications for a
+// particular characteristic.
 func (c *conn) delSub(char *ble.Characteristic) {
 	uuidStr := uuidStrWithDashes(char.UUID.String())
 

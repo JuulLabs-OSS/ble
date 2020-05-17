@@ -2,8 +2,10 @@ package darwin
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/JuulLabs-OSS/ble"
 	"github.com/JuulLabs-OSS/cbgo"
@@ -18,42 +20,68 @@ type connectResult struct {
 
 // Device is either a Peripheral or Central device.
 type Device struct {
+	// Embed these two bases so we don't have to override all the esoteric
+	// functions defined by CoreBluetooth delegate interfaces.
 	cbgo.CentralManagerDelegateBase
+	cbgo.PeripheralManagerDelegateBase
 
-	cm cbgo.CentralManager
+	cm  cbgo.CentralManager
+	pm  cbgo.PeripheralManager
+	evl deviceEventListener
+	pc  profCache
 
 	conns    map[string]*conn
 	connLock sync.Mutex
 
 	advHandler ble.AdvHandler
-	chConn     chan *connectResult
-	chState    chan struct{}
 }
 
 // NewDevice returns a BLE device.
 func NewDevice(opts ...ble.Option) (*Device, error) {
 	d := &Device{
-		cm:      cbgo.NewCentralManager(nil),
-		conns:   make(map[string]*conn),
-		chConn:  make(chan *connectResult),
-		chState: make(chan struct{}),
+		cm:    cbgo.NewCentralManager(nil),
+		pm:    cbgo.NewPeripheralManager(nil),
+		pc:    newProfCache(),
+		conns: make(map[string]*conn),
 	}
 
+	// Only proceed if Bluetooth is enabled.
+
+	blockUntilStateChange := func(getState func() cbgo.ManagerState) {
+		if getState() != cbgo.ManagerStateUnknown {
+			return
+		}
+
+		// Wait until state changes or until one second passes (whichever
+		// happens first).
+		for {
+			select {
+			case <-d.evl.stateChanged.Listen():
+				if getState() != cbgo.ManagerStateUnknown {
+					return
+				}
+
+			case <-time.NewTimer(time.Second).C:
+				return
+			}
+		}
+	}
+
+	// Ensure central manager is ready.
 	d.cm.SetDelegate(d)
-	<-d.chState
+	blockUntilStateChange(d.cm.State)
 	if d.cm.State() != cbgo.ManagerStatePoweredOn {
 		return nil, fmt.Errorf("central manager has invalid state: have=%d want=%d: is Bluetooth turned on?",
 			d.cm.State(), cbgo.ManagerStatePoweredOn)
 	}
 
-	go func() {
-		for {
-			_, ok := <-d.chState
-			if !ok {
-				break
-			}
-		}
-	}()
+	// Ensure peripheral manager is ready.
+	d.pm.SetDelegate(d)
+	blockUntilStateChange(d.pm.State)
+	if d.pm.State() != cbgo.ManagerStatePoweredOn {
+		return nil, fmt.Errorf("peripheral manager has invalid state: have=%d want=%d: is Bluetooth turned on?",
+			d.pm.State(), cbgo.ManagerStatePoweredOn)
+	}
 
 	return d, nil
 }
@@ -89,16 +117,24 @@ func (d *Device) Dial(ctx context.Context, a ble.Addr) (ble.Client, error) {
 		return nil, fmt.Errorf("dial failed: no peer with address: %s", a)
 	}
 
+	ch := d.evl.connected.Listen()
+	defer d.evl.connected.Close()
+
 	d.cm.Connect(prphs[0], nil)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-d.chConn:
-		if res.err != nil {
-			return nil, res.err
+	case itf := <-ch:
+		if itf == nil {
+			return nil, fmt.Errorf("connect failed: aborted")
+		}
+
+		ev := itf.(*eventConnected)
+		if ev.err != nil {
+			return nil, ev.err
 		} else {
-			res.conn.SetContext(ctx)
-			return NewClient(d.cm, res.conn)
+			ev.conn.SetContext(ctx)
+			return NewClient(d.cm, ev.conn)
 		}
 	}
 }
@@ -124,82 +160,17 @@ func (d *Device) findConn(a ble.Addr) *conn {
 	return d.conns[a.String()]
 }
 
-func (d *Device) DidUpdateState(cmgr cbgo.CentralManager) {
-	d.chState <- struct{}{}
-}
-
-func (d *Device) DidDiscoverPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral, advFields cbgo.AdvFields, rssi int) {
-	if d.advHandler == nil {
-		return
-	}
-
-	a := &adv{
-		localName: advFields.LocalName,
-		rssi:      int(rssi),
-		mfgData:   advFields.ManufacturerData,
-	}
-	if advFields.Connectable != nil {
-		a.connectable = *advFields.Connectable
-	}
-	if advFields.TxPowerLevel != nil {
-		a.powerLevel = *advFields.TxPowerLevel
-	}
-	for _, u := range advFields.ServiceUUIDs {
-		a.svcUUIDs = append(a.svcUUIDs, ble.UUID(u))
-	}
-	for _, sd := range advFields.ServiceData {
-		a.svcData = append(a.svcData, ble.ServiceData{
-			UUID: ble.UUID(sd.UUID),
-			Data: sd.Data,
-		})
-	}
-	a.peerUUID = ble.UUID(prph.Identifier())
-
-	d.advHandler(a)
-}
-
-func (d *Device) DidConnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral) {
+func (d *Device) addConn(c *conn) error {
 	d.connLock.Lock()
 	defer d.connLock.Unlock()
 
-	fail := func(err error) {
-		d.chConn <- &connectResult{
-			err: err,
-		}
+	if d.conns[c.addr.String()] != nil {
+		return fmt.Errorf("failed to add connection: already exists: addr=%v", c.addr)
 	}
 
-	a := ble.Addr(prph.Identifier())
+	d.conns[c.addr.String()] = c
 
-	if d.conns[a.String()] != nil {
-		fail(fmt.Errorf("failed to add connection: already exists: addr=%s", a.String()))
-		return
-	}
-
-	c := newConn(d, prph)
-	d.conns[a.String()] = c
-	d.chConn <- &connectResult{
-		conn: c,
-	}
-
-	go func() {
-		<-c.Disconnected()
-		d.delConn(c.addr)
-	}()
-}
-
-func (d *Device) DidDisconnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral, err error) {
-	c := d.findConn(ble.NewAddr(prph.Identifier().String()))
-	if c != nil {
-		c.evl.disconnected <- &eventDisconnected{
-			reason: err.(*cbgo.NSError).Code(),
-		}
-	}
-}
-
-func (d *Device) connectFail(err error) {
-	d.chConn <- &connectResult{
-		err: err,
-	}
+	return nil
 }
 
 func (d *Device) delConn(a ble.Addr) {
@@ -209,30 +180,176 @@ func (d *Device) delConn(a ble.Addr) {
 	delete(d.conns, a.String())
 }
 
+func (d *Device) connectFail(err error) {
+	d.evl.connected.RxSignal(&eventConnected{
+		err: err,
+	})
+}
+
+func chrPropPerm(c *ble.Characteristic) (cbgo.CharacteristicProperties, cbgo.AttributePermissions) {
+	var prop cbgo.CharacteristicProperties
+	var perm cbgo.AttributePermissions
+
+	if c.Property&ble.CharRead != 0 {
+		prop |= cbgo.CharacteristicPropertyRead
+		if ble.CharRead&c.Secure != 0 {
+			perm |= cbgo.AttributePermissionsReadEncryptionRequired
+		} else {
+			perm |= cbgo.AttributePermissionsReadable
+		}
+	}
+	if c.Property&ble.CharWriteNR != 0 {
+		prop |= cbgo.CharacteristicPropertyWriteWithoutResponse
+		if c.Secure&ble.CharWriteNR != 0 {
+			perm |= cbgo.AttributePermissionsWriteEncryptionRequired
+		} else {
+			perm |= cbgo.AttributePermissionsWriteable
+		}
+	}
+	if c.Property&ble.CharWrite != 0 {
+		prop |= cbgo.CharacteristicPropertyWrite
+		if c.Secure&ble.CharWrite != 0 {
+			perm |= cbgo.AttributePermissionsWriteEncryptionRequired
+		} else {
+			perm |= cbgo.AttributePermissionsWriteable
+		}
+	}
+	if c.Property&ble.CharNotify != 0 {
+		if c.Secure&ble.CharNotify != 0 {
+			prop |= cbgo.CharacteristicPropertyNotifyEncryptionRequired
+		} else {
+			prop |= cbgo.CharacteristicPropertyNotify
+		}
+	}
+	if c.Property&ble.CharIndicate != 0 {
+		if c.Secure&ble.CharIndicate != 0 {
+			prop |= cbgo.CharacteristicPropertyIndicateEncryptionRequired
+		} else {
+			prop |= cbgo.CharacteristicPropertyIndicate
+		}
+	}
+
+	return prop, perm
+}
+
 func (d *Device) AddService(svc *ble.Service) error {
-	return errors.New("Not supported")
+	chrMap := make(map[*ble.Characteristic]cbgo.Characteristic)
+	dscMap := make(map[*ble.Descriptor]cbgo.Descriptor)
+
+	msvc := cbgo.NewMutableService(cbgo.UUID(svc.UUID), true)
+
+	var mchrs []cbgo.MutableCharacteristic
+	for _, c := range svc.Characteristics {
+		prop, perm := chrPropPerm(c)
+		mchr := cbgo.NewMutableCharacteristic(cbgo.UUID(c.UUID), prop, c.Value, perm)
+
+		var mdscs []cbgo.MutableDescriptor
+		for _, d := range c.Descriptors {
+			mdsc := cbgo.NewMutableDescriptor(cbgo.UUID(d.UUID), d.Value)
+			mdscs = append(mdscs, mdsc)
+			dscMap[d] = mdsc.Descriptor()
+		}
+		mchr.SetDescriptors(mdscs)
+
+		mchrs = append(mchrs, mchr)
+		chrMap[c] = mchr.Characteristic()
+	}
+	msvc.SetCharacteristics(mchrs)
+
+	ch := d.evl.svcAdded.Listen()
+	d.pm.AddService(msvc)
+
+	itf := <-ch
+	if itf != nil {
+		return itf.(error)
+	}
+
+	d.pc.addSvc(svc, msvc.Service())
+	for chr, cbc := range chrMap {
+		d.pc.addChr(chr, cbc)
+	}
+	for dsc, cbd := range dscMap {
+		d.pc.addDsc(dsc, cbd)
+	}
+
+	return nil
 }
+
 func (d *Device) RemoveAllServices() error {
-	return errors.New("Not supported")
+	d.pm.RemoveAllServices()
+	return nil
 }
+
 func (d *Device) SetServices(svcs []*ble.Service) error {
-	return errors.New("Not supported")
+	d.RemoveAllServices()
+	for _, s := range svcs {
+		d.AddService(s)
+	}
+
+	return nil
 }
+
+func (d *Device) stopAdvertising() error {
+	d.pm.StopAdvertising()
+	return nil
+}
+
+func (d *Device) advData(ctx context.Context, ad cbgo.AdvData) error {
+	ch := d.evl.advStarted.Listen()
+	d.pm.StartAdvertising(ad)
+
+	itf := <-ch
+	if itf != nil {
+		return itf.(error)
+	}
+
+	<-ctx.Done()
+	_ = d.stopAdvertising()
+	return ctx.Err()
+}
+
 func (d *Device) Advertise(ctx context.Context, adv ble.Advertisement) error {
-	return errors.New("Not supported")
+	ad := cbgo.AdvData{}
+
+	ad.LocalName = adv.LocalName()
+	for _, u := range adv.Services() {
+		ad.ServiceUUIDs = append(ad.ServiceUUIDs, cbgo.UUID(u))
+	}
+
+	return d.advData(ctx, ad)
 }
+
 func (d *Device) AdvertiseNameAndServices(ctx context.Context, name string, uuids ...ble.UUID) error {
-	return errors.New("Not supported")
+	a := &adv{
+		localName: name,
+		svcUUIDs:  uuids,
+	}
+
+	return d.Advertise(ctx, a)
 }
+
 func (d *Device) AdvertiseMfgData(ctx context.Context, id uint16, b []byte) error {
+	// CoreBluetooth doesn't let you specify manufacturer data :(
 	return errors.New("Not supported")
 }
+
 func (d *Device) AdvertiseServiceData16(ctx context.Context, id uint16, b []byte) error {
+	// CoreBluetooth doesn't let you specify service data :(
 	return errors.New("Not supported")
 }
+
 func (d *Device) AdvertiseIBeaconData(ctx context.Context, b []byte) error {
-	return errors.New("Not supported")
+	ad := cbgo.AdvData{
+		IBeaconData: b,
+	}
+	return d.advData(ctx, ad)
 }
+
 func (d *Device) AdvertiseIBeacon(ctx context.Context, u ble.UUID, major, minor uint16, pwr int8) error {
-	return errors.New("Not supported")
+	b := make([]byte, 21)
+	copy(b, ble.Reverse(u))                   // Big endian
+	binary.BigEndian.PutUint16(b[16:], major) // Big endian
+	binary.BigEndian.PutUint16(b[18:], minor) // Big endian
+	b[20] = uint8(pwr)                        // Measured Tx Power
+	return d.AdvertiseIBeaconData(ctx, b)
 }
