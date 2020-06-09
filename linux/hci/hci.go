@@ -222,6 +222,10 @@ func (h *HCI) init() error {
 	WriteLEHostSupportRP := cmd.WriteLEHostSupportRP{}
 	h.Send(&cmd.WriteLEHostSupport{LESupportedHost: 1, SimultaneousLEHost: 0}, &WriteLEHostSupportRP)
 
+	LEWriteSuggDefaultDataLengthRP := cmd.LEWriteSuggDefaultDataLengthRP{}
+	h.Send(&cmd.LEWriteSuggDefaultDataLength{MaxTxOctets: ble.MaxOctsDLE, MaxTxTime: ble.MaxTimeDLE},
+		&LEWriteSuggDefaultDataLengthRP)
+
 	return h.err
 }
 
