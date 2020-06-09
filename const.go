@@ -7,6 +7,11 @@ const DefaultMTU = 23
 // The maximum length of an attribute value shall be 512 octets [Vol 3, Part F, 3.2.9]
 const MaxMTU = 512 + 3
 
+// Data Length Extension (DLE) to increase Data Channel Protocol Data Unit (PDU).
+// This feature is requested during hci init.
+const MaxOctsDLE = 251
+const MaxTimeDLE = 2120
+
 // UUIDs ...
 var (
 	GAPUUID         = UUID16(0x1800) // Generic Access

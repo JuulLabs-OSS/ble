@@ -1529,6 +1529,31 @@ func (c *LERemoteConnectionParameterRequestReplyRP) Unmarshal(b []byte) error {
 	return unmarshal(c, b)
 }
 
+type LEWriteSuggDefaultDataLength struct {
+	MaxTxOctets uint16
+	MaxTxTime   uint16
+}
+
+func (c *LEWriteSuggDefaultDataLength) String() string {
+	return "LE Write Suggested Default Data Length (0x08|0x0024)"
+}
+
+func (c *LEWriteSuggDefaultDataLength) OpCode() int { return 0x08<<10 | 0x0024 }
+
+func (c *LEWriteSuggDefaultDataLength) Len() int { return 4 }
+
+func (c *LEWriteSuggDefaultDataLength) Marshal(b []byte) error {
+	return marshal(c, b)
+}
+
+type LEWriteSuggDefaultDataLengthRP struct {
+	Status uint8
+}
+
+func (c *LEWriteSuggDefaultDataLengthRP) Unmarshal(b []byte) error {
+	return unmarshal(c, b)
+}
+
 // LERemoteConnectionParameterRequestNegativeReply implements LE Remote Connection Parameter Request Negative Reply (0x08|0x0021) [Vol 2, Part E, 7.8.32]
 type LERemoteConnectionParameterRequestNegativeReply struct {
 	ConnectionHandle uint16
